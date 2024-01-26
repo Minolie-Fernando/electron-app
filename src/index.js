@@ -1,6 +1,13 @@
 const { app, BrowserWindow, autoUpdater, dialog } = require("electron");
 const path = require("path");
 const os = require("os");
+const log = require("electron-log");
+
+log.initialize();
+
+log.info("Log from the main process");
+
+log.transports.file.file = "./debug.log";
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require("electron-squirrel-startup")) {
@@ -21,7 +28,7 @@ const createWindow = () => {
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
   // Open the DevTools.
-  mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools();
 
   console.log("1. Running auto updates check for updates");
   autoUpdater.checkForUpdates();
@@ -49,39 +56,25 @@ app.on("activate", () => {
   }
 });
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
+// Configure auto-updater to use electron-log
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = "debug";
 
 let updateFeed = "";
-let appVersion = 2;
+let appVersion = app.getVersion();
+
 try {
   if (os.platform() === "darwin") {
-    // updateFeed = "http://localhost:80/update/osx_64?update=true"; //http://localhost:80/download/osx_64 https://updates.publisherrocket.com/update/osx_64
-    autoUpdater.setFeedURL('http://localhost:80/update/' + "osx_64" + '/' + "2.0.0" + '/' + "stable");
+    updateFeed = `http://localhost:1337/update/osx/${appVersion}/`;
   } else {
+    updateFeed = `http://localhost:1337/update/windows_64/${appVersion}/`;
   }
 
-  // autoUpdater.setFeedURL(updateFeed);
-
-  // autoUpdater.addListener("checking-for-update", (event) => {
-
-  //   console.log(" 2. Checking for updates", event);
-  //   console.log(" 3. The updateFeed URL is : ", updateFeed);
-  //   updateFeed += appVersion;
-
-  // });
-
-  autoUpdater.on("checking-for-update", (event, releaseNotes, releaseName) => {
-    console.log(" 2. Checking for updates", event);
-    console.log(" 3. The updateFeed URL is : ", 'http://localhost:80/update/' + "osx_64" + '/' + "2.0.0" + '/' + "stable");
-  });
-
-  autoUpdater.on("update-not-available", (event) => {
-    console.log("Update not available!", event);
-  });
+  autoUpdater.setFeedURL({ url: updateFeed });
 
   autoUpdater.on("update-available", (event) => {
     console.log("new update available!");
+    console.log("updateFeed", updateFeed);
 
     const buttons = ["OK"];
     dialog.showMessageBox(
@@ -92,29 +85,63 @@ try {
         message: "There is a new app update",
       },
       (buttonIndex) => {
-        log.info(buttonIndex);
+        if (buttonIndex === 0) {
+          console.log("Calling update function");
+          autoUpdater.checkForUpdates();
+        }
       }
     );
   });
 
   autoUpdater.on("update-downloaded", (event, releaseNotes, releaseName) => {
-    const dialogOpts = {
-      type: "info",
-      buttons: ["Restart", "Later"],
-      title: "Application Update",
-      message: process.platform === "win32" ? releaseNotes : releaseName,
-      detail:
-        "A new version has been downloaded. Restart the application to apply the updates.",
-    };
+    console.log("Update downloaded!!!");
+    dialog
+      .showMessageBox({
+        type: "question",
+        buttons: ["Install and Restart", "Later"],
+        defaultId: 0,
+        message:
+          "A new update has been downloaded. Would you like to install and restart the app now?",
+      })
+      .then((selection) => {
+        if (selection.response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
+  });
 
-    dialog.showMessageBox(dialogOpts).then((returnValue) => {
-      if (returnValue.response === 0) autoUpdater.quitAndInstall();
-    });
+  autoUpdater.on("update-not-available", (event) => {
+    console.log("Update not available!", event);
+    const buttons = ["OK"];
+    dialog.showMessageBox(
+      {
+        type: "info",
+        buttons,
+        title: "Not update available",
+        message: "Not update available",
+      },
+      (buttonIndex) => {
+        log.info(buttonIndex);
+      }
+    );
   });
 
   autoUpdater.on("error", (message) => {
     console.error("There was a problem updating the application");
     console.error(message);
+    dialog
+      .showMessageBox({
+        type: "error",
+        buttons: ["OK"],
+        defaultId: 0,
+        message:
+          `There was an error with the update : ${message}`,
+      })
+      .then((selection) => {
+        if (selection.response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
   });
 } catch (error) {
   console.log("Caught error", error);
